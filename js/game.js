@@ -4,6 +4,7 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 const TAMANHO_BLOCO = 50; 
+// Grid 16x12 legítimo do Gran Trak. 1 = Parede Branca, 0 = Asfalto Preto, 2 = Linha Quadriculada
 const MAPA = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1],
@@ -19,24 +20,26 @@ const MAPA = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
-// Estado do seu carro
+// Estado do seu carro (Física Arcade Avançada)
 let meuCarro = {
-    x: 425, y: 175,
-    angulo: -Math.PI / 2,
-    velocidade: 0, velX: 0, velY: 0,
-    volta: 1, passouPeloCheckPoint: false,
-    raioColisao: 12 // Para cálculo de colisão circular entre carros
+    x: 425, 
+    y: 175,
+    angulo: -Math.PI / 2, // Apontando para cima na largada
+    velocidade: 0, 
+    velX: 0, 
+    velY: 0,
+    volta: 1, 
+    passouPeloCheckPoint: false,
+    raioColisao: 12
 };
 
 let jogadoresInimigos = {};
 const teclas = {};
 
-// Sistema de Audio
+// Efeitos de Áudio e Rastro
 let audioCtx = null;
 let oscMotor = null;
 let gainMotor = null;
-
-// Sistema de Rastros de Pneu (Skidmarks)
 let rastrosPneu = []; 
 
 window.addEventListener('keydown', e => { 
@@ -46,25 +49,21 @@ window.addEventListener('keydown', e => {
 window.addEventListener('keyup', e => teclas[e.key] = false);
 
 function inicializarAudio() {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    
-    // Configura áudio contínuo do motor
-    oscMotor = audioCtx.createOscillator();
-    gainMotor = audioCtx.createGain();
-    
-    oscMotor.type = 'triangle'; // Som mais suave que dita o ronco do motor
-    oscMotor.frequency.setValueAtTime(60, audioCtx.currentTime);
-    
-    gainMotor.gain.setValueAtTime(0.08, audioCtx.currentTime); // Volume baixo para não incomodar
-    
-    oscMotor.connect(gainMotor);
-    gainMotor.connect(audioCtx.destination);
-    oscMotor.start();
+    try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        oscMotor = audioCtx.createOscillator();
+        gainMotor = audioCtx.createGain();
+        oscMotor.type = 'triangle'; 
+        oscMotor.frequency.setValueAtTime(60, audioCtx.currentTime);
+        gainMotor.gain.setValueAtTime(0.06, audioCtx.currentTime); 
+        oscMotor.connect(gainMotor);
+        gainMotor.connect(audioCtx.destination);
+        oscMotor.start();
+    } catch(e) { console.log("Áudio não suportado"); }
 }
 
 function atualizarSomMotor() {
     if (!oscMotor) return;
-    // O tom do motor sobe proporcionalmente à velocidade real do carro
     let velReal = Math.sqrt(meuCarro.velX * meuCarro.velX + meuCarro.velY * meuCarro.velY);
     let novaFrequencia = 50 + (velReal * 35);
     oscMotor.frequency.setTargetAtTime(novaFrequencia, audioCtx.currentTime, 0.1);
@@ -93,44 +92,42 @@ function startCanvasGame() {
 }
 
 function atualizarFisica() {
-    // 1. Controle e Esterçamento Dinâmico
+    // 1. Controle Dinâmico de Curva (Mais difícil de virar em alta velocidade)
     let viraVel = 0.055 - (Math.abs(meuCarro.velocidade) * 0.004);
     if (teclas['ArrowLeft']) meuCarro.angulo -= viraVel;
     if (teclas['ArrowRight']) meuCarro.angulo += viraVel;
 
-    // 2. Aceleração e Turbo
+    // 2. Aceleração e botão de Turbo (Espaço)
     let aceleracao = 0.14;
     let maxVel = teclas[' '] ? 7.5 : 4.8; 
 
     if (teclas['ArrowUp']) {
         meuCarro.velocidade = Math.min(meuCarro.velocidade + aceleracao, maxVel); 
     } else if (teclas['ArrowDown']) {
-        meuCarro.velocidade = Math.max(meuCarro.velocidade - 0.18, -2.5); // Ré mais ágil
+        meuCarro.velocidade = Math.max(meuCarro.velocidade - 0.18, -2.5); 
     } else {
         meuCarro.velocidade *= 0.93; 
     }
 
-    // 3. Mecânica Avançada de Drift e Derrapagem
+    // 3. Sistema de Drift (Inércia)
     let destinoVelX = Math.cos(meuCarro.angulo) * meuCarro.velocidade;
     let destinoVelY = Math.sin(meuCarro.angulo) * meuCarro.velocidade;
 
-    // Diferença entre para onde o carro aponta e para onde ele está indo
     let desvioX = destinoVelX - meuCarro.velX;
     let desvioY = destinoVelY - meuCarro.velY;
     let intensidadeDerrapagem = Math.sqrt(desvioX * desvioX + desvioY * desvioY);
 
-    // Se estiver derrapando muito de lado ou usando nitro, deixa rastro no chão
     if (intensidadeDerrapagem > 1.8 || (teclas[' '] && meuCarro.velocidade > 3)) {
-        rastrosPneu.push({x: meuCarro.x, y: meuCarro.y, vida: 150}); // Dura 150 frames
+        rastrosPneu.push({x: meuCarro.x, y: meuCarro.y, vida: 120});
     }
 
-    meuCarro.velX += desvioX * 0.13; // Fator de aderência (0.13 garante o deslize perfeito)
-    meuCarro.velY += desvioY * 0.13;
+    meuCarro.velX += desvioX * 0.14; 
+    meuCarro.velY += desvioY * 0.14;
 
     let proximoX = meuCarro.x + meuCarro.velX;
     let proximoY = meuCarro.y + meuCarro.velY;
 
-    // 4. Colisão com o Cenário (Paredes)
+    // 4. Colisão Precisa com as Paredes
     if (checarColisaoParedes(proximoX, proximoY)) {
         tocarSomBatida();
         meuCarro.velocidade = -meuCarro.velocidade * 0.5; 
@@ -141,31 +138,22 @@ function atualizarFisica() {
         meuCarro.y = proximoY;
     }
 
-    // 5. NOVA: Colisão Dinâmica entre Carros (Bumping)
+    // 5. Colisão Física entre Carrinhos (Bumping)
     Object.keys(jogadoresInimigos).forEach(id => {
         let inimigo = jogadoresInimigos[id];
         let dx = meuCarro.x - inimigo.x;
         let dy = meuCarro.y - inimigo.y;
         let distancia = Math.sqrt(dx * dx + dy * dy);
-        let distanciaMinima = meuCarro.raioColisao + 12; // 12 é o raio aproximado do inimigo
-
-        if (distancia < distanciaMinima) {
+        if (distancia < (meuCarro.raioColisao + 12)) {
             tocarSomBatida();
-            // Calcula o ângulo do empurrão
             let anguloColisao = Math.atan2(dy, dx);
-            let empurraoX = Math.cos(anguloColisao) * 2.5;
-            let empurraoY = Math.sin(anguloColisao) * 2.5;
-
-            // Aplica forças opostas imediatamente
-            meuCarro.x += empurraoX;
-            meuCarro.y += empurraoY;
-            meuCarro.velX += empurraoX * 0.5;
-            meuCarro.velY += empurraoY * 0.5;
-            meuCarro.velocidade *= 0.6; // Perde embalo no baque
+            meuCarro.x += Math.cos(anguloColisao) * 3;
+            meuCarro.y += Math.sin(anguloColisao) * 3;
+            meuCarro.velocidade *= 0.5;
         }
     });
 
-    // 6. Voltas e Checkpoints
+    // 6. Voltas
     let col = Math.floor(meuCarro.x / TAMANHO_BLOCO);
     let row = Math.floor(meuCarro.y / TAMANHO_BLOCO);
     if(row > 7) meuCarro.passouPeloCheckPoint = true; 
@@ -175,7 +163,7 @@ function atualizarFisica() {
             meuCarro.volta++;
             meuCarro.passouPeloCheckPoint = false;
             if(meuCarro.volta > 3) {
-                alert("🏁 FIM DE PROVA! VOCÊ É O VENCEDOR!");
+                alert("🏁 FIM DE CORRIDA! VOCÊ VENCEU!");
                 meuCarro.volta = 1;
             }
         }
@@ -183,7 +171,6 @@ function atualizarFisica() {
 
     atualizarSomMotor();
 
-    // Atualiza HUD
     document.getElementById('placarVoltas').innerText = `VOLTA: ${meuCarro.volta}/3`;
     document.getElementById('placarVelocidade').innerText = `${Math.round(Math.abs(meuCarro.velocidade) * 32)} KM/H`;
 }
@@ -204,28 +191,28 @@ function checarColisaoParedes(x, y) {
 }
 
 function desenharRastros() {
-    ctx.fillStyle = 'rgba(40, 40, 40, 0.4)';
+    ctx.fillStyle = 'rgba(40, 40, 40, 0.4)'; // Marcas pretas suaves no asfalto
     for (let i = rastrosPneu.length - 1; i >= 0; i--) {
         let rastro = rastrosPneu[i];
         ctx.fillRect(rastro.x - 4, rastro.y - 4, 8, 8);
         rastro.vida--;
-        if (rastro.vida <= 0) rastrosPneu.splice(i, 1); // Remove rastros antigos
+        if (rastro.vida <= 0) rastrosPneu.splice(i, 1);
     }
 }
 
 function desenharPista() {
-    // Primeiro, limpamos e preenchemos todo o fundo do canvas de preto (o asfalto)
+    // RESOLVIDO: O Canvas inteiro vira asfalto preto primeiro
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     for (let r = 0; r < MAPA.length; r++) {
         for (let c = 0; c < MAPA[r].length; c++) {
             if (MAPA[r][c] === 1) {
-                // Desenha os blocos de parede brancos e sólidos (sem linhas separando)
+                // Desenha os blocos maciços brancos (sem grades cinzas)
                 ctx.fillStyle = '#ffffff'; 
                 ctx.fillRect(c * TAMANHO_BLOCO, r * TAMANHO_BLOCO, TAMANHO_BLOCO, TAMANHO_BLOCO);
             } else if (MAPA[r][c] === 2) {
-                // Desenha a linha de chegada quadriculada estilizada sobre o asfalto
+                // Linha de chegada quadriculada estilizada em alta definição de Canvas
                 for (let i = 0; i < TAMANHO_BLOCO; i += 10) {
                     for (let j = 0; j < TAMANHO_BLOCO; j += 10) {
                         ctx.fillStyle = ((i + j) / 10 % 2 === 0) ? '#ffffff' : '#000000';
@@ -242,18 +229,18 @@ function desenharCarro(x, y, angulo, corPrincipal, corDetalhe) {
     ctx.translate(x, y);
     ctx.rotate(angulo);
     
-    // Rodas largas (Visual agressivo)
-    ctx.fillStyle = '#222';
+    // Rodas
+    ctx.fillStyle = '#1a1a1a';
     ctx.fillRect(-13, -11, 7, 4);
     ctx.fillRect(6, -11, 7, 4);
     ctx.fillRect(-13, 7, 7, 4);
     ctx.fillRect(6, 7, 7, 4);
 
-    // Chassi
+    // Chassi do carro
     ctx.fillStyle = corPrincipal;
     ctx.fillRect(-13, -7, 26, 14);
     
-    // Aerofólio/Bico de cor diferente
+    // Bico direcional
     ctx.fillStyle = corDetalhe;
     ctx.fillRect(8, -7, 5, 14); 
     
@@ -261,18 +248,14 @@ function desenharCarro(x, y, angulo, corPrincipal, corDetalhe) {
 }
 
 function gameLoop() {
-    // 1. A renderização da pista já limpa a tela com o fundo preto correto
-    desenharFisica();
+    atualizarFisica();
     enviarMinhaPosicaoParaRede(meuCarro.x, meuCarro.y, meuCarro.angulo);
 
-    // 2. Camada Inferior: Marcas de derrapagem
+    // Renderização em ordem correta de camadas
+    desenharPista();
     desenharRastros();
 
-    // 3. Camada Média: Pista e Barreiras Brancas
-    desenharPista();
-
-    // 4. Camada Superior: Os carrinhos por cima de tudo
-    // Desenha Adversários (Vermelhos)
+    // Desenha Adversários conectados (Vermelhos)
     Object.keys(jogadoresInimigos).forEach(id => {
         let inimigo = jogadoresInimigos[id];
         desenharCarro(inimigo.x, inimigo.y, inimigo.angulo, '#ff3333', '#ffff00');
@@ -282,8 +265,4 @@ function gameLoop() {
     desenharCarro(meuCarro.x, meuCarro.y, meuCarro.angulo, '#00ff66', '#ffffff');
 
     requestAnimationFrame(gameLoop);
-}
-
-function atualizarPosicaoInimigo(id, x, y, angulo) {
-    jogadoresInimigos[id] = { x, y, angulo };
 }
