@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gran Trak Multiplayer</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+</head>
+<body>
+
+    <div id="menu">
+        <h1>GRAN TRAK MULTIPLAYER</h1>
+        <p>Hospede ou entre em uma partida com até 3 PCs na mesma rede.</p>
+        
+        <div class="actions">
+            <button id="btnCriar" onclick="criarSala()">Criar Nova Sala (Host)</button>
+            <div class="divider">ou</div>
+            <input type="text" id="idSalaInput" placeholder="Cole o Código da Sala aqui">
+            <button id="btnEntrar" onclick="conectarNaSala()">Entrar na Sala</button>
+        </div>
+
+        <div id="statusArea" class="hidden">
+            <p id="statusTexto">Conectando ao servidor de sinal...</p>
+            <div id="codigoCompartilhar" class="hidden">
+                <p>Compartilhe este código com os outros 2 jogadores:</p>
+                <strong id="idSalaGerado">---</strong>
+            </div>
+        </div>
+    </div>
+
+    <div id="jogoContainer" class="hidden">
+        <div id="hud">
+            <div id="placarVoltas">VOLTA: 1/3</div>
+            <div id="placarVelocidade">0 KM/H</div>
+        </div>
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="painelInfo">Setas (▲ ▼ ◄ ►) para pilotar. Espaço ativa o Turbo (se disponível).</div>
+    </div>
+
+    <script src="js/network.js"></script>
+    <script src="js/game.js"></script>
+</body>
+</html>
