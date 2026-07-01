@@ -4,12 +4,11 @@ const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
 
 const TAMANHO_BLOCO = 50; 
-// Grid 16x12. 1 = Parede, 0 = Asfalto, 2 = Linha de Chegada/Largada
 const MAPA = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
     [1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1],
     [1,0,1,1,1,1,0,1,1,0,1,1,1,1,0,1],
-    [1,0,1,1,1,1,0,2,2,0,1,1,1,1,0,1], // Linha de chegada no meio
+    [1,0,1,1,1,1,0,2,2,0,1,1,1,1,0,1], 
     [1,0,0,0,0,0,0,1,1,0,0,0,0,0,0,1],
     [1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1],
     [1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1],
@@ -20,98 +19,155 @@ const MAPA = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
-// Física melhorada: Adicionado vetor de movimento (velX, velY) para efeito de Drift
+// Estado do seu carro
 let meuCarro = {
-    x: 425,
-    y: 175,
-    angulo: -Math.PI / 2, // Apontando para cima na largada
-    velocidade: 0,
-    velX: 0,
-    velY: 0,
-    volta: 1,
-    passouPeloCheckPoint: false
+    x: 425, y: 175,
+    angulo: -Math.PI / 2,
+    velocidade: 0, velX: 0, velY: 0,
+    volta: 1, passouPeloCheckPoint: false,
+    raioColisao: 12 // Para cálculo de colisão circular entre carros
 };
 
 let jogadoresInimigos = {};
 const teclas = {};
+
+// Sistema de Audio
 let audioCtx = null;
+let oscMotor = null;
+let gainMotor = null;
+
+// Sistema de Rastros de Pneu (Skidmarks)
+let rastrosPneu = []; 
 
 window.addEventListener('keydown', e => { 
     teclas[e.key] = true;
-    // Inicializa o áudio no primeiro clique do jogador (exigência dos navegadores)
-    if(!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if(!audioCtx) inicializarAudio();
 });
 window.addEventListener('keyup', e => teclas[e.key] = false);
 
-// Sons Retro gerados via código (Web Audio API)
+function inicializarAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    
+    // Configura áudio contínuo do motor
+    oscMotor = audioCtx.createOscillator();
+    gainMotor = audioCtx.createGain();
+    
+    oscMotor.type = 'triangle'; // Som mais suave que dita o ronco do motor
+    oscMotor.frequency.setValueAtTime(60, audioCtx.currentTime);
+    
+    gainMotor.gain.setValueAtTime(0.08, audioCtx.currentTime); // Volume baixo para não incomodar
+    
+    oscMotor.connect(gainMotor);
+    gainMotor.connect(audioCtx.destination);
+    oscMotor.start();
+}
+
+function atualizarSomMotor() {
+    if (!oscMotor) return;
+    // O tom do motor sobe proporcionalmente à velocidade real do carro
+    let velReal = Math.sqrt(meuCarro.velX * meuCarro.velX + meuCarro.velY * meuCarro.velY);
+    let novaFrequencia = 50 + (velReal * 35);
+    oscMotor.frequency.setTargetAtTime(novaFrequencia, audioCtx.currentTime, 0.1);
+}
+
 function tocarSomBatida() {
     if(!audioCtx) return;
     let osc = audioCtx.createOscillator();
     let gain = audioCtx.createGain();
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(120, audioCtx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.3);
-    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+    osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(10, audioCtx.currentTime + 0.2);
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
     osc.start();
-    osc.stop(audioCtx.currentTime + 0.3);
+    osc.stop(audioCtx.currentTime + 0.2);
 }
 
 function startCanvasGame() {
     if (!ehHost) {
-        // Separa os carros no grid de largada
-        meuCarro.x += (Math.random() > 0.5 ? 25 : -25);
+        meuCarro.x += (Math.random() > 0.5 ? 20 : -20);
     }
     requestAnimationFrame(gameLoop);
 }
 
 function atualizarFisica() {
-    // 1. Direção sensível à velocidade (Gira menos se estiver muito rápido)
-    let viraVel = 0.06 - (Math.abs(meuCarro.velocidade) * 0.005);
+    // 1. Controle e Esterçamento Dinâmico
+    let viraVel = 0.055 - (Math.abs(meuCarro.velocidade) * 0.004);
     if (teclas['ArrowLeft']) meuCarro.angulo -= viraVel;
     if (teclas['ArrowRight']) meuCarro.angulo += viraVel;
 
-    // 2. Aceleração / Frenagem / Turbo
-    let aceleracao = 0.12;
-    let maxVel = teclas[' '] ? 7 : 4.5; // Barra de espaço ativa o Turbo!
+    // 2. Aceleração e Turbo
+    let aceleracao = 0.14;
+    let maxVel = teclas[' '] ? 7.5 : 4.8; 
 
     if (teclas['ArrowUp']) {
         meuCarro.velocidade = Math.min(meuCarro.velocidade + aceleracao, maxVel); 
     } else if (teclas['ArrowDown']) {
-        meuCarro.velocidade = Math.max(meuCarro.velocidade - 0.15, -2); // Ré
+        meuCarro.velocidade = Math.max(meuCarro.velocidade - 0.18, -2.5); // Ré mais ágil
     } else {
-        meuCarro.velocidade *= 0.94; // Atrito do asfalto
+        meuCarro.velocidade *= 0.93; 
     }
 
-    // 3. O SEGREDO DO DRIFT: Misturar a direção do carro com a inércia anterior
+    // 3. Mecânica Avançada de Drift e Derrapagem
     let destinoVelX = Math.cos(meuCarro.angulo) * meuCarro.velocidade;
     let destinoVelY = Math.sin(meuCarro.angulo) * meuCarro.velocidade;
 
-    // O fator 0.15 dita o deslize. Valores menores = mais sabão na pista.
-    meuCarro.velX += (destinoVelX - meuCarro.velX) * 0.15;
-    meuCarro.velY += (destinoVelY - meuCarro.velY) * 0.15;
+    // Diferença entre para onde o carro aponta e para onde ele está indo
+    let desvioX = destinoVelX - meuCarro.velX;
+    let desvioY = destinoVelY - meuCarro.velY;
+    let intensidadeDerrapagem = Math.sqrt(desvioX * desvioX + desvioY * desvioY);
+
+    // Se estiver derrapando muito de lado ou usando nitro, deixa rastro no chão
+    if (intensidadeDerrapagem > 1.8 || (teclas[' '] && meuCarro.velocidade > 3)) {
+        rastrosPneu.push({x: meuCarro.x, y: meuCarro.y, vida: 150}); // Dura 150 frames
+    }
+
+    meuCarro.velX += desvioX * 0.13; // Fator de aderência (0.13 garante o deslize perfeito)
+    meuCarro.velY += desvioY * 0.13;
 
     let proximoX = meuCarro.x + meuCarro.velX;
     let proximoY = meuCarro.y + meuCarro.velY;
 
-    // 4. Detecção de Colisão por pixel (Bordas do carro)
-    if (checarColisao(proximoX, proximoY)) {
+    // 4. Colisão com o Cenário (Paredes)
+    if (checarColisaoParedes(proximoX, proximoY)) {
         tocarSomBatida();
-        meuCarro.velocidade = -meuCarro.velocidade * 0.4; // Rebote
-        meuCarro.velX = -meuCarro.velX * 0.4;
-        meuCarro.velY = -meuCarro.velY * 0.4;
+        meuCarro.velocidade = -meuCarro.velocidade * 0.5; 
+        meuCarro.velX = -meuCarro.velX * 0.5;
+        meuCarro.velY = -meuCarro.velY * 0.5;
     } else {
         meuCarro.x = proximoX;
         meuCarro.y = proximoY;
     }
 
-    // 5. Sistema de Voltas e Checkpoint (Evita trapaça de andar de ré)
+    // 5. NOVA: Colisão Dinâmica entre Carros (Bumping)
+    Object.keys(jogadoresInimigos).forEach(id => {
+        let inimigo = jogadoresInimigos[id];
+        let dx = meuCarro.x - inimigo.x;
+        let dy = meuCarro.y - inimigo.y;
+        let distancia = Math.sqrt(dx * dx + dy * dy);
+        let distanciaMinima = meuCarro.raioColisao + 12; // 12 é o raio aproximado do inimigo
+
+        if (distancia < distanciaMinima) {
+            tocarSomBatida();
+            // Calcula o ângulo do empurrão
+            let anguloColisao = Math.atan2(dy, dx);
+            let empurraoX = Math.cos(anguloColisao) * 2.5;
+            let empurraoY = Math.sin(anguloColisao) * 2.5;
+
+            // Aplica forças opostas imediatamente
+            meuCarro.x += empurraoX;
+            meuCarro.y += empurraoY;
+            meuCarro.velX += empurraoX * 0.5;
+            meuCarro.velY += empurraoY * 0.5;
+            meuCarro.velocidade *= 0.6; // Perde embalo no baque
+        }
+    });
+
+    // 6. Voltas e Checkpoints
     let col = Math.floor(meuCarro.x / TAMANHO_BLOCO);
     let row = Math.floor(meuCarro.y / TAMANHO_BLOCO);
-
-    // Metade de baixo da pista serve de checkpoint
     if(row > 7) meuCarro.passouPeloCheckPoint = true; 
 
     if (row >= 0 && row < MAPA.length && col >= 0 && col < MAPA[0].length) {
@@ -119,27 +175,24 @@ function atualizarFisica() {
             meuCarro.volta++;
             meuCarro.passouPeloCheckPoint = false;
             if(meuCarro.volta > 3) {
-                alert("FIM DE CORRIDA! VOCÊ VENCEU!");
+                alert("🏁 FIM DE PROVA! VOCÊ É O VENCEDOR!");
                 meuCarro.volta = 1;
             }
         }
     }
 
-    // Atualiza Painel Visual (HUD)
+    atualizarSomMotor();
+
+    // Atualiza HUD
     document.getElementById('placarVoltas').innerText = `VOLTA: ${meuCarro.volta}/3`;
-    document.getElementById('placarVelocidade').innerText = `${Math.round(Math.abs(meuCarro.velocidade) * 30)} KM/H`;
+    document.getElementById('placarVelocidade').innerText = `${Math.round(Math.abs(meuCarro.velocidade) * 32)} KM/H`;
 }
 
-function checarColisao(x, y) {
-    // Checa o centro e as 4 extremidades do carro
+function checarColisaoParedes(x, y) {
     let pontos = [
-        {x: x, y: y},
-        {x: x - 10, y: y - 6},
-        {x: x + 10, y: y - 6},
-        {x: x - 10, y: y + 6},
-        {x: x + 10, y: y + 6}
+        {x: x - 11, y: y - 7}, {x: x + 11, y: y - 7},
+        {x: x - 11, y: y + 7}, {x: x + 11, y: y + 7}
     ];
-
     for(let p of pontos) {
         let col = Math.floor(p.x / TAMANHO_BLOCO);
         let row = Math.floor(p.y / TAMANHO_BLOCO);
@@ -150,6 +203,16 @@ function checarColisao(x, y) {
     return false;
 }
 
+function desenharRastros() {
+    ctx.fillStyle = 'rgba(40, 40, 40, 0.4)';
+    for (let i = rastrosPneu.length - 1; i >= 0; i--) {
+        let rastro = rastrosPneu[i];
+        ctx.fillRect(rastro.x - 4, rastro.y - 4, 8, 8);
+        rastro.vida--;
+        if (rastro.vida <= 0) rastrosPneu.splice(i, 1); // Remove rastros antigos
+    }
+}
+
 function desenharPista() {
     for (let r = 0; r < MAPA.length; r++) {
         for (let c = 0; c < MAPA[r].length; c++) {
@@ -157,33 +220,32 @@ function desenharPista() {
                 ctx.fillStyle = '#ffffff'; 
                 ctx.fillRect(c * TAMANHO_BLOCO, r * TAMANHO_BLOCO, TAMANHO_BLOCO - 1, TAMANHO_BLOCO - 1);
             } else if (MAPA[r][c] === 2) {
-                // Linha de chegada quadriculada retro
-                ctx.fillStyle = (c % 2 === 0) ? '#fff' : '#444';
+                ctx.fillStyle = (c % 2 === 0) ? '#ffffff' : '#333333';
                 ctx.fillRect(c * TAMANHO_BLOCO, r * TAMANHO_BLOCO, TAMANHO_BLOCO, TAMANHO_BLOCO);
             }
         }
     }
 }
 
-function desenharCarro(x, y, angulo, corPrincipal, corDetalhe, rastro) {
+function desenharCarro(x, y, angulo, corPrincipal, corDetalhe) {
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angulo);
     
-    // Rodas (Estilo F1 clássico exposto)
-    ctx.fillStyle = '#444';
-    ctx.fillRect(-12, -10, 6, 4);
-    ctx.fillRect(6, -10, 6, 4);
-    ctx.fillRect(-12, 6, 6, 4);
-    ctx.fillRect(6, 6, 6, 4);
+    // Rodas largas (Visual agressivo)
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-13, -11, 7, 4);
+    ctx.fillRect(6, -11, 7, 4);
+    ctx.fillRect(-13, 7, 7, 4);
+    ctx.fillRect(6, 7, 7, 4);
 
-    // Corpo do carro
+    // Chassi
     ctx.fillStyle = corPrincipal;
-    ctx.fillRect(-12, -6, 24, 12);
+    ctx.fillRect(-13, -7, 26, 14);
     
-    // bico/aerofólio frontal
+    // Aerofólio/Bico de cor diferente
     ctx.fillStyle = corDetalhe;
-    ctx.fillRect(8, -6, 4, 12); 
+    ctx.fillRect(8, -7, 5, 14); 
     
     ctx.restore();
 }
@@ -193,16 +255,19 @@ function gameLoop() {
 
     atualizarFisica();
     enviarMinhaPosicaoParaRede(meuCarro.x, meuCarro.y, meuCarro.angulo);
+
+    // Renderização em Camadas (Rastro fica embaixo da pista/carros)
+    desenharRastros();
     desenharPista();
 
-    // Desenha os competidores da rede primeiro (para o seu ficar por cima)
+    // Desenha Adversários (Vermelhos)
     Object.keys(jogadoresInimigos).forEach(id => {
         let inimigo = jogadoresInimigos[id];
         desenharCarro(inimigo.x, inimigo.y, inimigo.angulo, '#ff3333', '#ffff00');
     });
 
-    // Seu carrinho (Verde Neon de destaque)
-    desenharCarro(meuCarro.x, meuCarro.y, meuCarro.angulo, '#00ff00', '#ffffff');
+    // Desenha Seu Carro (Verde Elétrico)
+    desenharCarro(meuCarro.x, meuCarro.y, meuCarro.angulo, '#00ff66', '#ffffff');
 
     requestAnimationFrame(gameLoop);
 }
