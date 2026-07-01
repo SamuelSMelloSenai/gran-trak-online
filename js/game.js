@@ -214,14 +214,24 @@ function desenharRastros() {
 }
 
 function desenharPista() {
+    // Primeiro, limpamos e preenchemos todo o fundo do canvas de preto (o asfalto)
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     for (let r = 0; r < MAPA.length; r++) {
         for (let c = 0; c < MAPA[r].length; c++) {
             if (MAPA[r][c] === 1) {
+                // Desenha os blocos de parede brancos e sólidos (sem linhas separando)
                 ctx.fillStyle = '#ffffff'; 
-                ctx.fillRect(c * TAMANHO_BLOCO, r * TAMANHO_BLOCO, TAMANHO_BLOCO - 1, TAMANHO_BLOCO - 1);
-            } else if (MAPA[r][c] === 2) {
-                ctx.fillStyle = (c % 2 === 0) ? '#ffffff' : '#333333';
                 ctx.fillRect(c * TAMANHO_BLOCO, r * TAMANHO_BLOCO, TAMANHO_BLOCO, TAMANHO_BLOCO);
+            } else if (MAPA[r][c] === 2) {
+                // Desenha a linha de chegada quadriculada estilizada sobre o asfalto
+                for (let i = 0; i < TAMANHO_BLOCO; i += 10) {
+                    for (let j = 0; j < TAMANHO_BLOCO; j += 10) {
+                        ctx.fillStyle = ((i + j) / 10 % 2 === 0) ? '#ffffff' : '#000000';
+                        ctx.fillRect((c * TAMANHO_BLOCO) + i, (r * TAMANHO_BLOCO) + j, 10, 10);
+                    }
+                }
             }
         }
     }
@@ -251,22 +261,24 @@ function desenharCarro(x, y, angulo, corPrincipal, corDetalhe) {
 }
 
 function gameLoop() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    atualizarFisica();
+    // 1. A renderização da pista já limpa a tela com o fundo preto correto
+    desenharFisica();
     enviarMinhaPosicaoParaRede(meuCarro.x, meuCarro.y, meuCarro.angulo);
 
-    // Renderização em Camadas (Rastro fica embaixo da pista/carros)
+    // 2. Camada Inferior: Marcas de derrapagem
     desenharRastros();
+
+    // 3. Camada Média: Pista e Barreiras Brancas
     desenharPista();
 
+    // 4. Camada Superior: Os carrinhos por cima de tudo
     // Desenha Adversários (Vermelhos)
     Object.keys(jogadoresInimigos).forEach(id => {
         let inimigo = jogadoresInimigos[id];
         desenharCarro(inimigo.x, inimigo.y, inimigo.angulo, '#ff3333', '#ffff00');
     });
 
-    // Desenha Seu Carro (Verde Elétrico)
+    // Desenha Seu Carro (Verde Neon)
     desenharCarro(meuCarro.x, meuCarro.y, meuCarro.angulo, '#00ff66', '#ffffff');
 
     requestAnimationFrame(gameLoop);
